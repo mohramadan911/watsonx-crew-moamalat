@@ -59,13 +59,12 @@ class MSGraphClient:
             
             # Log the response
             print(f"Draft creation response: {response.status_code}")
-            print(f"Response content: {response.text[:500]}...")
             
             # If successful, the message should be created but not sent
             if response.status_code in [200, 201]:
                 return True
             else:
-                print(f"Failed to create draft: {response.text}")
+                print(f"Failed to create draft: {response.text[:500]}")
                 return False
         
         except Exception as e:

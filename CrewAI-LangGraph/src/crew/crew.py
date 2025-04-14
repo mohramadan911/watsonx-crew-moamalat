@@ -11,6 +11,19 @@ class EmailFilterCrew():
 		self.writer_agent = agents.email_response_writer()
 
 	def kickoff(self, state):
+		# Safely handle None values
+		current_count = state.get("iteration_count")
+		if current_count is None:
+			current_count = 0
+		
+		# Increment counter
+		state["iteration_count"] = current_count + 1
+		
+		# Add a safety check
+		if state.get("iteration_count", 0) > 10:  # Adjust as needed
+			print("Maximum iterations reached, terminating workflow")
+			return {**state, "action_required_emails": "Max iterations reached"}
+		
 		print("### Filtering emails")
 		tasks = EmailFilterTasks()
 		crew = Crew(
@@ -28,11 +41,18 @@ class EmailFilterCrew():
 	def _format_emails(self, emails):
 		emails_string = []
 		for email in emails:
-			print(email)
+			print(f"Email ID: {email['id']}")
+			print(f"Snippet length: {len(email.get('snippet', ''))}")
+			
+			# Strictly limit snippet size
+			snippet = email.get('snippet', '')
+			if len(snippet) > 200:
+				snippet = snippet[:200] + "..."
+			
 			arr = [
 				f"ID: {email['id']}",
 				f"- Thread ID: {email['threadId']}",
-				f"- Snippet: {email['snippet']}",
+				f"- Snippet: {snippet}",
 				f"- From: {email['sender']}",
 				f"--------"
 			]

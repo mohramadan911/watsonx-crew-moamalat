@@ -1,7 +1,7 @@
-import datetime
-from typing import TypedDict
+from typing import TypedDict, Optional, List, Dict, Any
 
-class EmailsState(TypedDict):
-	checked_emails_ids: list[str]
-	emails: list[dict]
-	action_required_emails: dict
+class EmailsState(TypedDict, total=False):
+    checked_emails_ids: List[str]
+    emails: List[Dict]
+    action_required_emails: Dict
+    iteration_count: int

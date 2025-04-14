@@ -16,13 +16,17 @@ class CreateDraftTool():
                 to = data.get("to")
                 subject = data.get("subject")
                 message = data.get("message")
-            elif data.startswith("{") and data.endswith("}"):
+            elif isinstance(data, str) and data.startswith("{") and "}" in data:
                 # JSON as string
                 import json
-                parsed = json.loads(data)
-                to = parsed.get("to")
-                subject = parsed.get("subject")
-                message = parsed.get("message")
+                try:
+                    parsed = json.loads(data)
+                    to = parsed.get("to")
+                    subject = parsed.get("subject")
+                    message = parsed.get("message")
+                except json.JSONDecodeError:
+                    # If JSON parsing fails, try pipe-delimited format
+                    to, subject, message = data.split('|')
             else:
                 # Fall back to pipe-delimited
                 to, subject, message = data.split('|')
@@ -44,9 +48,7 @@ class EmailThreadTool():
     @tool("Fetch Email Thread")
     def fetch_thread(thread_id: str):
         """
-        Fetch full email thread from Microsoft Graph using a thread ID.
-        Input: a thread/conversation ID string
-        Output: full thread content (concatenated emails)
+        Fetch email thread summary with attachment info
         """
         client = MSGraphClient(
             client_id=os.environ['MS_CLIENT_ID'],
@@ -56,32 +58,36 @@ class EmailThreadTool():
         )
         if not client.get_token():
             return "Unable to retrieve token"
-
+        
         headers = {"Authorization": f"Bearer {client.access_token}"}
         
-        # Method 1: Try to fetch messages directly (without filtering by conversationId)
-        url = f"https://graph.microsoft.com/v1.0/users/{client.user_email}/messages?$top=10&$orderby=receivedDateTime desc"
-        response = requests.get(url, headers=headers)
+        # Use $select to only get needed fields
+        url = f"https://graph.microsoft.com/v1.0/users/{client.user_email}/messages?$filter=conversationId eq '{thread_id}'&$select=id,subject,from,receivedDateTime,bodyPreview,hasAttachments&$top=5&$orderby=receivedDateTime desc"
         
-        if response.status_code != 200:
-            return f"Error fetching messages: {response.text}"
-        
-        # Filter the messages by conversationId on the client side
-        all_messages = response.json().get('value', [])
-        thread_messages = [msg for msg in all_messages if msg.get('conversationId') == thread_id]
-        
-        if not thread_messages:
-            # Alternative method: Try to get the specific message if we have its ID
-            # This works if thread_id might actually be a message ID
-            url = f"https://graph.microsoft.com/v1.0/users/{client.user_email}/messages/{thread_id}"
+        try:
             response = requests.get(url, headers=headers)
-            if response.status_code == 200:
-                message = response.json()
-                thread_messages = [message]
-        
-        full_thread = "\n\n".join(
-            f"From: {email['from']['emailAddress']['address']}\nSubject: {email.get('subject')}\n\n{email.get('body', {}).get('content', '')}"
-            for email in thread_messages
-        )
-        
-        return full_thread or "No emails found in thread"
+            if response.status_code == 400:  # If filter is still too complex
+                # Fallback to alternative method
+                url = f"https://graph.microsoft.com/v1.0/users/{client.user_email}/messages?$top=10&$select=id,subject,from,receivedDateTime,bodyPreview,hasAttachments,conversationId&$orderby=receivedDateTime desc"
+                response = requests.get(url, headers=headers)
+                all_messages = response.json().get('value', [])
+                thread_messages = [msg for msg in all_messages if msg.get('conversationId') == thread_id]
+            else:
+                thread_messages = response.json().get('value', [])
+            
+            summary = []
+            for msg in thread_messages:
+                has_attachments = msg.get('hasAttachments', False)
+                attachment_note = " [Has attachments]" if has_attachments else ""
+                
+                summary.append(f"""
+    From: {msg.get('from', {}).get('emailAddress', {}).get('address', 'Unknown')}
+    Date: {msg.get('receivedDateTime', 'Unknown')}
+    Subject: {msg.get('subject', 'No Subject')}
+    Preview: {msg.get('bodyPreview', '')[:150]}...{attachment_note}
+    ---
+    """)
+            
+            return "\n".join(summary) or "No emails found in thread"
+        except Exception as e:
+            return f"Error processing thread: {str(e)}"

@@ -41,48 +41,57 @@ class Nodes():
         return False
 
     def check_email(self, state):
-        print("# Checking for new emails (MS Graph)")
-        if not self.msgraph.get_token():
-            return state
+        try:
+            print("# Checking for new emails (MS Graph)")
+            if not self.msgraph.get_token():
+                return state
 
-        headers = {"Authorization": f"Bearer {self.msgraph.access_token}"}
-        response = requests.get(
-            f"https://graph.microsoft.com/v1.0/users/{self.msgraph.user_email}/messages?$top=10&$orderby=receivedDateTime desc",
-            headers=headers
-        )
-
-        emails = response.json().get('value', [])
-        new_emails = []
-        thread_ids = []
-        checked_emails = state.get('checked_emails_ids') or []
-        my_email = os.environ.get('MY_EMAIL', '')
-
-        for email in emails:
-            sender = (
-                email.get('from', {})
-                .get('emailAddress', {})
-                .get('address', '')
+            headers = {"Authorization": f"Bearer {self.msgraph.access_token}"}
+            response = requests.get(
+                f"https://graph.microsoft.com/v1.0/users/{self.msgraph.user_email}/messages?$top=10&$orderby=receivedDateTime desc",
+                headers=headers
             )
 
-            print(f"🕵️ Checking sender: {sender}")
-            if not self.is_valid_sender(sender, my_email):
-                print(f"❌ Skipped: {sender}")
-                continue
+            emails = response.json().get('value', [])
+            new_emails = []
+            thread_ids = []
+            checked_emails = state.get('checked_emails_ids') or []
+            my_email = os.environ.get('MY_EMAIL', '')
 
-            if email.get('id') and email['id'] not in checked_emails:
-                thread_id = email.get('conversationId')
-                if thread_id and thread_id not in thread_ids:
-                    new_emails.append({
-                        'id': email['id'],
-                        'threadId': thread_id,
-                        'snippet': email.get('bodyPreview', ''),
-                        'sender': sender
-                    })
-                    thread_ids.append(thread_id)
-                    print(f"✅ New Email Added: {sender}")
+            for email in emails:
+                sender = (
+                    email.get('from', {})
+                    .get('emailAddress', {})
+                    .get('address', '')
+                )
 
-        checked_emails.extend([email.get('id') for email in emails if email.get('id')])
-        return {**state, 'emails': new_emails, 'checked_emails_ids': checked_emails}
+                print(f"🕵️ Checking sender: {sender}")
+                if not self.is_valid_sender(sender, my_email):
+                    print(f"❌ Skipped: {sender}")
+                    continue
+
+                if email.get('id') and email['id'] not in checked_emails:
+                    thread_id = email.get('conversationId')
+                    if thread_id and thread_id not in thread_ids:
+                        # Limit snippet size to reduce token usage
+                        snippet = email.get('bodyPreview', '')
+                        if len(snippet) > 300:
+                            snippet = snippet[:300] + "..."
+                            
+                        new_emails.append({
+                            'id': email['id'],
+                            'threadId': thread_id,
+                            'snippet': snippet,
+                            'sender': sender
+                        })
+                        thread_ids.append(thread_id)
+                        print(f"✅ New Email Added: {sender}")
+
+            checked_emails.extend([email.get('id') for email in emails if email.get('id')])
+            return {**state, 'emails': new_emails, 'checked_emails_ids': checked_emails}
+        except Exception as e:
+            print(f"Error checking emails: {str(e)}")
+            return {**state, 'emails': [], 'error': str(e)}
 
     def wait_next_run(self, state):
         print("## Waiting for 20 seconds")
