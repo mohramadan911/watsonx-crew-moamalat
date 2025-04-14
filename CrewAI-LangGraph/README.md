@@ -1,5 +1,17 @@
 # CrewAI + LangGraph
 
+
+### how to run crewgraph 
+
+- make sure you have python3.11
+- make sure to connect to llm provider maybe remote ollama for free
+- make sure to set proper .env file
+- make sure you install requirments.txt file
+- python3.11 -m venv venv 
+- source venv/bin/activate
+- python3 pip install -r requirements.txt or without python3 
+- any other pacakge it is better to run it with python3 pip install (pacakge_name)
+
 ## Introduction
 This is an example of how to use the [CrewAI](https://github.com/joaomdmoura/crewai) with LangChain and LangGraph to automate the process of automatically checking emails and creating drafts. CrewAI orchestrates autonomous AI agents, enabling them to collaborate and execute complex tasks efficiently.
 
