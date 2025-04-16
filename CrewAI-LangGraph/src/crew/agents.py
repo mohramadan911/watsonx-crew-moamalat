@@ -1,7 +1,10 @@
+# agents.py
 from crewai import Agent
 from textwrap import dedent
 from .tools import CreateDraftTool, EmailThreadTool
 from langchain_community.tools.tavily_search import TavilySearchResults
+# You can add this line if your agents use LLMs directly
+# from langchain_openai import ChatOpenAI
 
 class EmailFilterAgents():
     def email_filter_agent(self):
