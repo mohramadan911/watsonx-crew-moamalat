@@ -55,7 +55,11 @@ class Nodes():
             emails = response.json().get('value', [])
             new_emails = []
             thread_ids = []
+            
+            # Initialize tracking lists if they don't exist
             checked_emails = state.get('checked_emails_ids') or []
+            processed_thread_ids = state.get('processed_thread_ids') or []
+            
             my_email = os.environ.get('MY_EMAIL', '')
 
             for email in emails:
@@ -70,16 +74,22 @@ class Nodes():
                     print(f"❌ Skipped: {sender}")
                     continue
 
-                if email.get('id') and email['id'] not in checked_emails:
-                    thread_id = email.get('conversationId')
-                    if thread_id and thread_id not in thread_ids:
+                # Get both ID and thread ID
+                email_id = email.get('id')
+                thread_id = email.get('conversationId')
+                
+                # Only process if:
+                # 1. We haven't seen this email ID before
+                # 2. We haven't processed this thread ID before
+                if email_id and email_id not in checked_emails and thread_id and thread_id not in processed_thread_ids:
+                    if thread_id not in thread_ids:  # Avoid duplicates in current batch
                         # Limit snippet size to reduce token usage
                         snippet = email.get('bodyPreview', '')
                         if len(snippet) > 300:
                             snippet = snippet[:300] + "..."
                             
                         new_emails.append({
-                            'id': email['id'],
+                            'id': email_id,
                             'threadId': thread_id,
                             'snippet': snippet,
                             'sender': sender
@@ -87,8 +97,15 @@ class Nodes():
                         thread_ids.append(thread_id)
                         print(f"✅ New Email Added: {sender}")
 
+            # Mark all emails as checked
             checked_emails.extend([email.get('id') for email in emails if email.get('id')])
-            return {**state, 'emails': new_emails, 'checked_emails_ids': checked_emails}
+            
+            # Update state with new emails and tracking information
+            return {
+                **state, 
+                'emails': new_emails, 
+                'checked_emails_ids': checked_emails
+            }
         except Exception as e:
             print(f"Error checking emails: {str(e)}")
             return {**state, 'emails': [], 'error': str(e)}
@@ -100,3 +117,17 @@ class Nodes():
 
     def new_emails(self, state):
         return "continue" if state.get('emails') else "end"
+    
+    def mark_threads_as_processed(self, state):
+        """Mark all processed email threads as processed to avoid duplicate responses"""
+        processed_thread_ids = state.get('processed_thread_ids') or []
+        
+        # Add all thread IDs from current batch to processed list
+        for email in state.get('emails', []):
+            thread_id = email.get('threadId')
+            if thread_id and thread_id not in processed_thread_ids:
+                processed_thread_ids.append(thread_id)
+                print(f"📝 Marked thread {thread_id} as processed")
+        
+        # Update state with processed thread IDs
+        return {**state, 'processed_thread_ids': processed_thread_ids}
