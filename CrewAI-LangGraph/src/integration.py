@@ -171,19 +171,24 @@ class EmailIntegration:
                 result["success"] = True
                 result["message"] = "Successfully integrated email with external system"
                 try:
-                    result["api_response"] = response.json()
-                except:
-                    result["api_response"] = response.text
-            else:
-                result["success"] = False
-                result["message"] = f"Failed to integrate email: HTTP {response.status_code}"
-                try:
-                    result["api_response"] = response.json()
-                except:
-                    result["api_response"] = response.text
-                
-                logger.error(f"API error: {result['message']}")
-                logger.error(f"API response: {result['api_response']}")
+                    json_response = response.json()
+                    result["api_response"] = json_response
+
+                    if "payload" in json_response and "correspondenceId" in json_response["payload"]:
+                        result["correspondence_id"] = json_response["payload"]["correspondenceId"]
+                        logger.info(f"Correspondence created with ID: {result['correspondence_id']}")
+
+                        # Optional: notify sender
+                        sender_email = email_data.get("sender", "")
+                        if sender_email:
+                            send_confirmation_email(
+                                recipient_email=sender_email,
+                                subject=email_data.get("subject", "Your Email"),
+                                correspondence_id=result["correspondence_id"]
+                            )
+                except Exception as e:
+                    logger.warning(f"Failed to parse JSON response: {e}")
+
             
         except requests.exceptions.RequestException as e:
             result["success"] = False
@@ -538,3 +543,45 @@ def fetch_attachments_from_graph(thread_id: str, save_dir: str = "attachments") 
                     logger.error(f"Failed to save attachment {filename}: {e}")
     
     return downloaded_files
+
+def send_confirmation_email(recipient_email: str, subject: str, correspondence_id: str):
+    """
+    Sends a confirmation email to the sender with the created correspondence ID.
+    """
+    try:
+        access_token = get_graph_token()
+        user_email = os.getenv("MS_USER_EMAIL")
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        body = {
+            "message": {
+                "subject": f"📬 Your email has been processed: {subject}",
+                "body": {
+                    "contentType": "Text",
+                    "content": f"Your correspondence has been successfully processed.\n\nCorrespondence ID: {correspondence_id}\n\nThank you."
+                },
+                "toRecipients": [
+                    {
+                        "emailAddress": {
+                            "address": recipient_email
+                        }
+                    }
+                ]
+            },
+            "saveToSentItems": "true"
+        }
+
+        endpoint = f"https://graph.microsoft.com/v1.0/users/{user_email}/sendMail"
+        response = requests.post(endpoint, headers=headers, json=body)
+
+        if response.status_code in [202]:
+            logger.info(f"Confirmation email sent to: {recipient_email}")
+        else:
+            logger.warning(f"Failed to send confirmation email: {response.status_code}, {response.text}")
+    
+    except Exception as e:
+        logger.error(f"Error sending confirmation email: {e}")
