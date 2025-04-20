@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Email Status UI</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 2em; }
+        h1 { color: #333; }
+        h2 { margin-top: 2em; }
+        pre {
+            background: #f4f4f4;
+            padding: 1em;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>📊 Email Processing Status</h1>
+
+    <h2>✅ Agent Logs</h2>
+    {% if crew_logs %}
+        <pre>{{ crew_logs | join('\n\n') }}</pre>
+    {% else %}
+        <p>No logs available.</p>
+    {% endif %}
+
+    <h2>📦 Final Payload Sent to External API</h2>
+    <pre>{{ payload | tojson(indent=2) }}</pre>
+</body>
+</html>

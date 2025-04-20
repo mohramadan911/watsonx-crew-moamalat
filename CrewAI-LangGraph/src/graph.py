@@ -13,20 +13,22 @@ class WorkFlow():
         workflow = StateGraph(EmailsState)
 
         workflow.add_node("check_new_emails", nodes.check_email)
+        workflow.add_node("process_emails", EmailFilterCrew().kickoff)
+        workflow.add_node("integrate_emails", nodes.integrate_with_external_api)  # Add new integration node
+        workflow.add_node("mark_processed", nodes.mark_threads_as_processed)
         workflow.add_node("wait_next_run", nodes.wait_next_run)
-        workflow.add_node("draft_responses", EmailFilterCrew().kickoff)
-        workflow.add_node("mark_processed", nodes.mark_threads_as_processed)  # New node
 
         workflow.set_entry_point("check_new_emails")
         workflow.add_conditional_edges(
                 "check_new_emails",
                 nodes.new_emails,
                 {
-                    "continue": 'draft_responses',
+                    "continue": 'process_emails',
                     "end": 'wait_next_run'
                 }
         )
-        workflow.add_edge('draft_responses', 'mark_processed')  # Add edge to new node
-        workflow.add_edge('mark_processed', 'wait_next_run')    # Connect to wait_next_run
+        workflow.add_edge('process_emails', 'integrate_emails')  # Add edge to new integration node
+        workflow.add_edge('integrate_emails', 'mark_processed')  # Connect integration to mark_processed
+        workflow.add_edge('mark_processed', 'wait_next_run')
         workflow.add_edge('wait_next_run', 'check_new_emails')
         self.app = workflow.compile()

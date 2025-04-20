@@ -3,6 +3,7 @@ import time
 import requests
 from dotenv import load_dotenv
 from src.msgraph_client import MSGraphClient
+from src.integration import integrate_emails  # Import the new integration function
 
 # Load environment variables
 load_dotenv()
@@ -92,7 +93,8 @@ class Nodes():
                             'id': email_id,
                             'threadId': thread_id,
                             'snippet': snippet,
-                            'sender': sender
+                            'sender': sender,
+                            'subject': email.get('subject', 'No Subject')  # Add subject for integration
                         })
                         thread_ids.append(thread_id)
                         print(f"✅ New Email Added: {sender}")
@@ -117,6 +119,33 @@ class Nodes():
 
     def new_emails(self, state):
         return "continue" if state.get('emails') else "end"
+    
+    def integrate_with_external_api(self, state):
+        """Integrate processed emails with the external API system"""
+        print("## Integrating emails with external API")
+        
+        # Check if we have any action required emails to integrate
+        action_required_emails = state.get('action_required_emails')
+        if not action_required_emails:
+            print("No action required emails to integrate")
+            return {**state, 'integration_results': {"success": False, "message": "No emails to integrate"}}
+        
+        try:
+            # Call the integration function
+            integration_results = integrate_emails(action_required_emails)
+            
+            # Log the results
+            success_count = sum(1 for r in integration_results.get('results', []) if r.get('integration_result', {}).get('success', False))
+            total_count = len(integration_results.get('results', []))
+            
+            print(f"## Integration complete: {success_count}/{total_count} emails successfully integrated")
+            
+            # Return updated state with integration results
+            return {**state, 'integration_results': integration_results}
+            
+        except Exception as e:
+            print(f"Error integrating emails: {str(e)}")
+            return {**state, 'integration_results': {"success": False, "message": f"Integration error: {str(e)}"}}
     
     def mark_threads_as_processed(self, state):
         """Mark all processed email threads as processed to avoid duplicate responses"""

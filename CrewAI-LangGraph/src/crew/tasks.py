@@ -19,6 +19,7 @@ class EmailFilterTasks:
 
                 Your final answer MUST be the relevant thread_ids and the sender, use bullet points.
             """),
+            expected_output="A list of relevant thread IDs and senders in bullet point format.",
             agent=agent
         )
 
@@ -26,8 +27,6 @@ class EmailFilterTasks:
         return Task(
             description=dedent("""\
                 For each email thread, fetch and analyze the complete thread using only the actual Thread ID.
-                Use the 'Fetch Email Thread' tool provided.
-
                 Understand the context, key points, and the overall sentiment of the conversation.
 
                 Identify the main query or concerns that needs to be addressed in the response for each.
@@ -39,30 +38,10 @@ class EmailFilterTasks:
                 - identify the user and who he will be answering to
                 - communication style in the thread
                 - the sender's email address
+                - a list of attachments (if any)
+                - a summary of each attachment's content (if possible)
+                - a review of any links found (if possible)
             """),
-            agent=agent
-        )
-
-    def draft_responses_task(self, agent):
-        return Task(
-            description=dedent("""\
-                Based on the action-required emails identified, draft responses for each.
-                Ensure that each response is tailored to address the specific needs
-                and context outlined in the email.
-
-                - Assume the persona of the user and mimic the communication style in the thread.
-                - Feel free to do research on the topic to provide a more detailed response, IF NECESSARY.
-                - IF a research is necessary do it BEFORE drafting the response.
-                - If you need to pull the thread again do it using only the actual Thread ID.
-
-                Use the tool provided to draft each of the responses.
-                When using the tool pass the following input:
-                - to (sender to be responded)
-                - subject
-                - message
-
-                You MUST create all drafts before sending your final answer.
-                Your final answer MUST be a confirmation that all responses have been drafted.
-            """),
+            expected_output="A detailed analysis of each email thread with thread ID, summary, main points, communication style, and attachment information.",
             agent=agent
         )

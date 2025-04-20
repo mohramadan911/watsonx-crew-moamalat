@@ -6,6 +6,15 @@ import os
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from fastapi import Request
+
+CREW_LOGS = []
+templates = Jinja2Templates(directory="src/templates")
+
+
+
 
 # Import your existing components
 from src.graph import WorkFlow
@@ -18,12 +27,38 @@ app = FastAPI(
     version="0.1.0"
 )
 
+from fastapi import APIRouter
+
+@app.post("/test-integration")
+def test_integration():
+    test_email = {
+        "id": "test-id",
+        "threadId": "test-thread-id",
+        "subject": "Test Email for Dry Run",
+        "body": "This is a dry-run payload to validate integration logic and external API behavior.",
+        "attachments": []  # no file
+    }
+
+    from src.integration import EmailIntegration
+    integration = EmailIntegration()
+    result = integration.send_to_external_api(test_email)
+    return result
+
+@app.get("/status/ui", response_class=HTMLResponse)
+async def view_status(request: Request):
+    return templates.TemplateResponse("status.html", {
+        "request": request,
+        "crew_logs": CREW_LOGS,
+        "payload": processing_status.get("final_payload", {})
+    })
+
 # Global variables to track processing status
 processing_status = {
     "is_running": False,
     "last_run": None,
     "processed_count": 0,
-    "current_batch": []
+    "current_batch": [],
+    "integration_results": None  # Added field to track integration results
 }
 
 # Initialize database
@@ -40,7 +75,8 @@ def init_db():
         start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         end_time TIMESTAMP,
         emails_processed INTEGER DEFAULT 0,
-        status TEXT
+        status TEXT,
+        integration_success INTEGER DEFAULT 0
     )
     ''')
     conn.commit()
@@ -61,6 +97,7 @@ class StatusResponse(BaseModel):
     processed_count: int
     current_batch: List[Dict[str, Any]] = []
     job_history: List[Dict[str, Any]] = []
+    integration_results: Optional[Dict[str, Any]] = None  # Added field
 
 # Function to get job history - thread-safe version
 def get_job_history():
@@ -70,7 +107,7 @@ def get_job_history():
         conn.row_factory = sqlite3.Row  # Return rows as dictionaries
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT id, start_time, end_time, emails_processed, status FROM api_runs ORDER BY id DESC LIMIT 5"
+            "SELECT id, start_time, end_time, emails_processed, status, integration_success FROM api_runs ORDER BY id DESC LIMIT 5"
         )
         return [dict(row) for row in cursor.fetchall()]
     except Exception as e:
@@ -111,30 +148,54 @@ def process_emails_task():
         processing_status["is_running"] = True
         processing_status["last_run"] = datetime.now().isoformat()
         processing_status["current_batch"] = []
+        processing_status["integration_results"] = None
         
-        # Create and run workflow
+        # Create and run workflow with empty initial state
+        # The workflow will check for emails internally
         workflow = WorkFlow()
-        result = workflow.app.invoke({})
         
+        # Pass an empty dictionary as the initial state
+        # and set a reasonable recursion limit
+        result = workflow.app.invoke({}, config={"recursion_limit": 100})
+        
+        CREW_LOGS.clear()
+        CREW_LOGS.extend(result.get("crew_logs", ["No logs found"]))
+        processing_status["final_payload"] = result.get("final_payload", {})
         # Extract processed emails
         emails_processed = 0
-        if "emails" in result:
-            emails_processed = len(result["emails"])
+        if result and "emails" in result:
+            emails_processed = len(result.get("emails", []))
             processing_status["processed_count"] += emails_processed
-            processing_status["current_batch"] = result["emails"]
+            processing_status["current_batch"] = result.get("emails", [])
+        
+        # Extract integration results if available
+        integration_results = result.get("integration_results", None)
+        # Simulate capturing CrewAI agent logs & payload
+        processing_status["crew_logs"] = result.get("crew_logs", ["Log not available"])  # Example
+        processing_status["final_payload"] = result.get("final_payload", {})  # Example
+
+        processing_status["integration_results"] = integration_results
+        
+        # Determine integration success
+        integration_success = 0
+        if integration_results and integration_results.get("success", False):
+            integration_success = 1
         
         # Update job status
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE api_runs SET status = ?, end_time = CURRENT_TIMESTAMP, emails_processed = ? WHERE id = ?",
-            ("completed", emails_processed, job_id)
+            "UPDATE api_runs SET status = ?, end_time = CURRENT_TIMESTAMP, emails_processed = ?, integration_success = ? WHERE id = ?",
+            ("completed", emails_processed, integration_success, job_id)
         )
         conn.commit()
         conn.close()
         
+        print(f"Job completed. Processed {emails_processed} emails. Integration success: {integration_success}")
+        
     except Exception as e:
         # Update job status on error
+        print(f"Error in process_emails_task: {str(e)}")
         try:
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
@@ -150,6 +211,7 @@ def process_emails_task():
     finally:
         # Reset running state
         processing_status["is_running"] = False
+
 
 # API endpoints
 @app.post("/process-emails", response_model=ProcessingResponse)
@@ -195,8 +257,25 @@ async def get_status():
         last_run=processing_status["last_run"],
         processed_count=processing_status["processed_count"],
         current_batch=processing_status["current_batch"],
-        job_history=job_history
+        job_history=job_history,
+        integration_results=processing_status["integration_results"]  # Include integration results
     )
+
+# Add an endpoint to get just the integration results
+@app.get("/integration-results")
+async def get_integration_results():
+    """Get the results of the most recent integration"""
+    
+    if processing_status["integration_results"] is None:
+        return {
+            "message": "No integration results available",
+            "results": None
+        }
+    
+    return {
+        "message": "Integration results retrieved successfully",
+        "results": processing_status["integration_results"]
+    }
 
 # Add a root endpoint for better user experience
 @app.get("/")
@@ -206,9 +285,12 @@ async def root():
         "documentation": "/docs",
         "endpoints": [
             {"path": "/process-emails", "method": "POST", "description": "Start email processing"},
-            {"path": "/status", "method": "GET", "description": "Check processing status"}
+            {"path": "/status", "method": "GET", "description": "Check processing status (JSON)"},
+            {"path": "/status/ui", "method": "GET", "description": "View logs and payload in browser"},
+            {"path": "/integration-results", "method": "GET", "description": "Get integration results"}
         ]
     }
+
 
 # Run the API with uvicorn
 if __name__ == "__main__":

@@ -1,4 +1,15 @@
-__pycache__
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment and secrets
 .env
 credentials.json
 token.json
+
+# Virtual environment
+venv_py311/
+
+# VSCode and other editor config
+.vscode/
+*.swp

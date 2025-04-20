@@ -11,39 +11,32 @@ import langsmith
 
 class EmailFilterCrew():
     def __init__(self):
+        self.logger = logging.getLogger(__name__)  # ✅ Add this line
+
         agents = EmailFilterAgents()
         self.filter_agent = agents.email_filter_agent()
         self.action_agent = agents.email_action_agent()
-        self.writer_agent = agents.email_response_writer()
         
         # Set up callbacks list
         self.callbacks = []
         
         # Set up tracing
         try:
-            # Initialize tracing - cleaner approach for langchain-v2
             project_name = os.getenv("LANGSMITH_PROJECT", "email-automation")
-            
-            # Check if LangSmith is configured
             if os.getenv("LANGSMITH_API_KEY"):
-                # Register a callback for tracing
                 tracer = langsmith.Client().as_callback(project_name=project_name)
                 self.callbacks.append(tracer)
                 print(f"LangSmith tracing initialized for project: {project_name}")
         except Exception as e:
             logging.warning(f"Failed to initialize LangSmith tracing: {str(e)}")
 
+
     def kickoff(self, state):
         # Safely handle None values
-        current_count = state.get("iteration_count")
-        if current_count is None:
-            current_count = 0
-        
-        # Increment counter
+        current_count = state.get("iteration_count", 0)
         state["iteration_count"] = current_count + 1
         
-        # Add a safety check
-        if state.get("iteration_count", 0) > 10:  # Adjust as needed
+        if state["iteration_count"] > 10:
             print("Maximum iterations reached, terminating workflow")
             return {**state, "action_required_emails": "Max iterations reached"}
         
@@ -51,11 +44,10 @@ class EmailFilterCrew():
         tasks = EmailFilterTasks()
         
         crew = Crew(
-            agents=[self.filter_agent, self.action_agent, self.writer_agent],
+            agents=[self.filter_agent, self.action_agent],
             tasks=[
                 tasks.filter_emails_task(self.filter_agent, self._format_emails(state['emails'])),
-                tasks.action_required_emails_task(self.action_agent),
-                tasks.draft_responses_task(self.writer_agent)
+                tasks.action_required_emails_task(self.action_agent)
             ],
             verbose=True,
             callbacks=self.callbacks
@@ -63,8 +55,17 @@ class EmailFilterCrew():
         
         # Run the crew
         result = crew.kickoff()
+        self.logger.info(f"Crew result: {result}")
+
+        # Extract final_output to pass as plain text
+        if hasattr(result, "final_output"):
+            output_text = result.final_output
+            print("✔️ Extracted final_output from Crew result.")
+        else:
+            output_text = str(result)
+            print("⚠️ Crew result did not have final_output. Falling back to string representation.")
         
-        return {**state, "action_required_emails": result}
+        return {**state, "action_required_emails": output_text}
 
     def _format_emails(self, emails):
         emails_string = []
@@ -72,7 +73,6 @@ class EmailFilterCrew():
             print(f"Email ID: {email['id']}")
             print(f"Snippet length: {len(email.get('snippet', ''))}")
             
-            # Strictly limit snippet size
             snippet = email.get('snippet', '')
             if len(snippet) > 200:
                 snippet = snippet[:200] + "..."

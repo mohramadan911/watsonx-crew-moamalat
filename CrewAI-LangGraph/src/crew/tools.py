@@ -1,48 +1,22 @@
+# tools.py
 from langchain.tools import tool
 from src.msgraph_client import MSGraphClient
 import os
 import requests
+from src.utils.attachment_summary import summarize_attachments_with_gpt
 
-class CreateDraftTool():
-    @tool("Create Draft")
-    def create_draft(data):
-        """
-        Create an email draft using Microsoft Graph.
-        Input format: to|subject|message or JSON object
-        """
-        try:
-            # Try JSON format first
-            if isinstance(data, dict):
-                to = data.get("to")
-                subject = data.get("subject")
-                message = data.get("message")
-            elif isinstance(data, str) and data.startswith("{") and "}" in data:
-                # JSON as string
-                import json
-                try:
-                    parsed = json.loads(data)
-                    to = parsed.get("to")
-                    subject = parsed.get("subject")
-                    message = parsed.get("message")
-                except json.JSONDecodeError:
-                    # If JSON parsing fails, try pipe-delimited format
-                    to, subject, message = data.split('|')
-            else:
-                # Fall back to pipe-delimited
-                to, subject, message = data.split('|')
-                
-            client = MSGraphClient(
-                client_id=os.environ['MS_CLIENT_ID'],
-                client_secret=os.environ['MS_CLIENT_SECRET'],
-                tenant_id=os.environ['MS_TENANT_ID'],
-                user_email=os.environ['MS_USER_EMAIL']
-            )
-            print(f"Creating draft to: {to}, subject: {subject}")
-            success = client.send_email(to_email=to, subject=subject, body=message)
-            return f"Draft {'created' if success else 'failed'}"
-        except Exception as e:
-            print(f"Error creating draft: {str(e)}")
-            return f"Draft failed: {str(e)}"
+def download_attachment(client, message_id, attachment_id, filename, save_dir="attachments"):
+    os.makedirs(save_dir, exist_ok=True)
+    headers = {"Authorization": f"Bearer {client.access_token}"}
+    url = f"https://graph.microsoft.com/v1.0/users/{client.user_email}/messages/{message_id}/attachments/{attachment_id}/$value"
+    response = requests.get(url, headers=headers)
+
+    if response.ok:
+        filepath = os.path.join(save_dir, filename)
+        with open(filepath, "wb") as f:
+            f.write(response.content)
+        return filepath
+    return None
 
 class EmailThreadTool():
     @tool("Fetch Email Thread")
@@ -60,34 +34,56 @@ class EmailThreadTool():
             return "Unable to retrieve token"
         
         headers = {"Authorization": f"Bearer {client.access_token}"}
-        
-        # Use $select to only get needed fields
         url = f"https://graph.microsoft.com/v1.0/users/{client.user_email}/messages?$filter=conversationId eq '{thread_id}'&$select=id,subject,from,receivedDateTime,bodyPreview,hasAttachments&$top=5&$orderby=receivedDateTime desc"
-        
+
         try:
             response = requests.get(url, headers=headers)
-            if response.status_code == 400:  # If filter is still too complex
-                # Fallback to alternative method
+            if response.status_code == 400:
                 url = f"https://graph.microsoft.com/v1.0/users/{client.user_email}/messages?$top=10&$select=id,subject,from,receivedDateTime,bodyPreview,hasAttachments,conversationId&$orderby=receivedDateTime desc"
                 response = requests.get(url, headers=headers)
                 all_messages = response.json().get('value', [])
                 thread_messages = [msg for msg in all_messages if msg.get('conversationId') == thread_id]
             else:
                 thread_messages = response.json().get('value', [])
-            
+
             summary = []
             for msg in thread_messages:
                 has_attachments = msg.get('hasAttachments', False)
-                attachment_note = " [Has attachments]" if has_attachments else ""
-                
+                attachment_paths = []
+
+                if has_attachments:
+                    attach_url = f"https://graph.microsoft.com/v1.0/users/{client.user_email}/messages/{msg['id']}/attachments"
+                    attach_resp = requests.get(attach_url, headers=headers).json()
+
+                    for att in attach_resp.get("value", []):
+                        if att.get('@odata.type') == "#microsoft.graph.fileAttachment":
+                            filename = att.get("name")
+                            attachment_id = att.get("id")
+                            local_path = download_attachment(client, msg['id'], attachment_id, filename)
+                            if local_path:
+                                attachment_paths.append(local_path)
+
+                attachment_note = f" [Has attachments: {', '.join(os.path.basename(p) for p in attachment_paths)}]" if attachment_paths else ""
+
+                if attachment_paths:
+                    try:
+                        att_summary, link_summary = summarize_attachments_with_gpt(attachment_paths)
+                        summary.append(f"📎 Attachments downloaded: {', '.join(os.path.basename(p) for p in attachment_paths)}")
+                        summary.append(att_summary)
+                        summary.append(f"🔗 Link Safety Review:\n{link_summary}")
+                    except Exception as e:
+                        summary.append(f"⚠️ Attachment processing error: {str(e)}")
+
                 summary.append(f"""
-    From: {msg.get('from', {}).get('emailAddress', {}).get('address', 'Unknown')}
-    Date: {msg.get('receivedDateTime', 'Unknown')}
-    Subject: {msg.get('subject', 'No Subject')}
-    Preview: {msg.get('bodyPreview', '')[:150]}...{attachment_note}
-    ---
-    """)
-            
+From: {msg.get('from', {}).get('emailAddress', {}).get('address', 'Unknown')}
+Date: {msg.get('receivedDateTime', 'Unknown')}
+Subject: {msg.get('subject', 'No Subject')}
+Preview: {msg.get('bodyPreview', '')[:150]}...{attachment_note}
+---
+""")
+
             return "\n".join(summary) or "No emails found in thread"
         except Exception as e:
             return f"Error processing thread: {str(e)}"
+        
+email_thread_tool = EmailThreadTool().fetch_thread
