@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi import Request
+import requests
 
 CREW_LOGS = []
 templates = Jinja2Templates(directory="src/templates")
@@ -28,6 +29,56 @@ app = FastAPI(
 )
 
 from fastapi import APIRouter
+
+@app.post("/test-integration-with-attachment")
+def test_integration_with_attachment():
+    test_email = {
+        "id": "test-id",
+        "threadId": "test-thread-id",
+        "subject": "Test Email with Fake Attachment",
+        "body": "This is a dry-run payload including a base64-encoded fake attachment.",
+        "attachments": []  # Not needed, since we'll inject manually
+    }
+
+    from src.integration import EmailIntegration
+    integration = EmailIntegration()
+    
+    # Prepare the payload as usual
+    payload = integration._prepare_payload(test_email)
+
+    # Inject a fake base64-encoded attachment (e.g., content = "test file content")
+    payload["attachment"] = "dGVzdCBmaWxlIGNvbnRlbnQ="
+
+    # Log it
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔧 Sending test payload with fake attachment:\n{payload}")
+
+    # Send request
+    headers = {
+        "Content-Type": "application/json"
+    }
+    if integration.api_token:
+        headers["Authorization"] = f"Bearer {integration.api_token}"
+
+    try:
+        response = requests.post(integration.api_url, headers=headers, json=payload, timeout=30)
+        result = {
+            "success": response.status_code in [200, 201],
+            "status_code": response.status_code,
+            "api_response": response.json() if "application/json" in response.headers.get("content-type", "") else response.text
+        }
+    except Exception as e:
+        result = {
+            "success": False,
+            "error": str(e)
+        }
+
+    return {
+        "payload": payload,
+        "result": result
+    }
+
 
 @app.post("/test-integration")
 def test_integration():
