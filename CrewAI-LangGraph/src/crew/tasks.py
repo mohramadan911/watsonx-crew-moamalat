@@ -26,22 +26,18 @@ class EmailFilterTasks:
     def action_required_emails_task(self, agent):
         return Task(
             description=dedent("""\
-                For each email thread, fetch and analyze the complete thread using only the actual Thread ID.
-                Understand the context, key points, and the overall sentiment of the conversation.
+                For each email thread, analyze the complete thread.
+                Your final answer MUST use this EXACT format for each email:
 
-                Identify the main query or concerns that needs to be addressed in the response for each.
-
-                Your final answer MUST be a list for all emails with:
-                - the thread_id
-                - a summary of the email thread
-                - a highlighting with the main points
-                - identify the user and who he will be answering to
-                - communication style in the thread
-                - the sender's email address
-                - a list of attachments (if any)
-                - a summary of each attachment's content (if possible)
-                - a review of any links found (if possible)
-            """),
-            expected_output="A detailed analysis of each email thread with thread ID, summary, main points, communication style, and attachment information.",
+                ### Thread ID: [thread_id]
+                **Subject:** [subject]
+                **Sender's Email Address:** [sender_email]
+                **Summary:** [thread_summary]
+                **Main Points:**
+                - [point 1]
+                - [point 2]
+                **Attachments:** [filename1, filename2] or None
+                """),
+            expected_output="A detailed analysis of each email thread in the specified format.",
             agent=agent
         )

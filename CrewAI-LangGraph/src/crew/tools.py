@@ -22,7 +22,7 @@ class EmailThreadTool():
     @tool("Fetch Email Thread")
     def fetch_thread(thread_id: str):
         """
-        Fetch email thread summary with attachment info
+        Fetch email thread summary with attachment info.
         """
         client = MSGraphClient(
             client_id=os.environ['MS_CLIENT_ID'],
@@ -30,21 +30,26 @@ class EmailThreadTool():
             tenant_id=os.environ['MS_TENANT_ID'],
             user_email=os.environ['MS_USER_EMAIL']
         )
+
         if not client.get_token():
-            return "Unable to retrieve token"
-        
+            return "❌ Unable to retrieve Microsoft Graph token"
+
         headers = {"Authorization": f"Bearer {client.access_token}"}
-        url = f"https://graph.microsoft.com/v1.0/users/{client.user_email}/messages?$filter=conversationId eq '{thread_id}'&$select=id,subject,from,receivedDateTime,bodyPreview,hasAttachments&$top=5&$orderby=receivedDateTime desc"
+        url = (
+            f"https://graph.microsoft.com/v1.0/users/{client.user_email}/messages"
+            f"?$filter=conversationId eq '{thread_id}'"
+            f"&$select=id,subject,from,receivedDateTime,bodyPreview,hasAttachments"
+            f"&$top=10&$orderby=receivedDateTime desc"
+        )
 
         try:
             response = requests.get(url, headers=headers)
-            if response.status_code == 400:
-                url = f"https://graph.microsoft.com/v1.0/users/{client.user_email}/messages?$top=10&$select=id,subject,from,receivedDateTime,bodyPreview,hasAttachments,conversationId&$orderby=receivedDateTime desc"
-                response = requests.get(url, headers=headers)
-                all_messages = response.json().get('value', [])
-                thread_messages = [msg for msg in all_messages if msg.get('conversationId') == thread_id]
-            else:
-                thread_messages = response.json().get('value', [])
+            if response.status_code != 200:
+                return f"❌ Graph API error {response.status_code}: {response.text}"
+
+            thread_messages = response.json().get('value', [])
+            if not thread_messages:
+                return "⚠️ No emails found in this thread"
 
             summary = []
             for msg in thread_messages:
@@ -63,27 +68,29 @@ class EmailThreadTool():
                             if local_path:
                                 attachment_paths.append(local_path)
 
-                attachment_note = f" [Has attachments: {', '.join(os.path.basename(p) for p in attachment_paths)}]" if attachment_paths else ""
-
                 if attachment_paths:
+                    summary.append(f"📎 Attachments downloaded: {', '.join(os.path.basename(p) for p in attachment_paths)}")
                     try:
                         att_summary, link_summary = summarize_attachments_with_gpt(attachment_paths)
-                        summary.append(f"📎 Attachments downloaded: {', '.join(os.path.basename(p) for p in attachment_paths)}")
                         summary.append(att_summary)
                         summary.append(f"🔗 Link Safety Review:\n{link_summary}")
                     except Exception as e:
                         summary.append(f"⚠️ Attachment processing error: {str(e)}")
 
-                summary.append(f"""
-From: {msg.get('from', {}).get('emailAddress', {}).get('address', 'Unknown')}
-Date: {msg.get('receivedDateTime', 'Unknown')}
-Subject: {msg.get('subject', 'No Subject')}
-Preview: {msg.get('bodyPreview', '')[:150]}...{attachment_note}
----
-""")
+                attachment_note = f" [Has attachments: {', '.join(os.path.basename(p) for p in attachment_paths)}]" if attachment_paths else ""
 
-            return "\n".join(summary) or "No emails found in thread"
+                summary.append(f"""
+    From: {msg.get('from', {}).get('emailAddress', {}).get('address', 'Unknown')}
+    Date: {msg.get('receivedDateTime', 'Unknown')}
+    Subject: {msg.get('subject', 'No Subject')}
+    Preview: {msg.get('bodyPreview', '')[:150]}...{attachment_note}
+    ---
+    """)
+
+            return "\n".join(summary)
+
         except Exception as e:
-            return f"Error processing thread: {str(e)}"
+            return f"❌ Error processing thread: {str(e)}"
+
         
 email_thread_tool = EmailThreadTool().fetch_thread

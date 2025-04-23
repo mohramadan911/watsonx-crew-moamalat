@@ -238,195 +238,142 @@ class EmailIntegration:
 def parse_action_required_emails(action_required_emails):
     """
     Parse the emails from action required emails data.
-    
-    Args:
-        action_required_emails: String, dictionary, or CrewAI output containing email data
-        
-    Returns:
-        List of dictionaries with parsed email data
     """
     emails = []
     
     try:
-        # Handle CrewAI output
-        if str(type(action_required_emails)).find('crewai.crews.crew_output.CrewOutput') != -1:
-            logger.info("Parsing CrewOutput from CrewAI")
-            
-            # Convert CrewOutput to string to extract data
-            crew_output_str = str(action_required_emails)
-            logger.info(f"CrewOutput preview: {crew_output_str[:500]}...")
-            
-            # Try to extract email data from the Email Action Specialist's output
-            # Look for thread IDs in the final answer
-            thread_ids = re.findall(r'Thread ID:?\s*([A-Za-z0-9+=\/]+)', crew_output_str)
-            logger.info(f"Found {len(thread_ids)} thread IDs: {thread_ids}")
-            
-            # Look for email summaries
-            email_sections = re.split(r'\d+\.\s+\*\*Thread ID:\*\*', crew_output_str)
-            if len(email_sections) <= 1:
-                # Try alternative pattern
-                email_sections = re.split(r'Thread ID:', crew_output_str)[1:]
-            
-            # Process each section
-            for i, section in enumerate(email_sections):
-                if i >= len(thread_ids):
-                    continue
-                    
-                thread_id = thread_ids[i]
-                
-                email_data = {
-                    "threadId": thread_id,
-                    "id": thread_id
-                }
-                
-                # Extract subject
-                subject_match = re.search(r'Summary:?\s*(.*?)(?=\n|\*\*|$)', section)
-                if subject_match:
-                    email_data["subject"] = subject_match.group(1).strip()
-                else:
-                    email_data["subject"] = "Email from CrewAI Analysis"
-                
-                # Extract sender
-                sender_match = re.search(r'Sender\'s Email Address:?\s*(.*?)(?=\n|\*\*|$)', section)
-                if not sender_match:
-                    sender_match = re.search(r'Sender:?\s*(.*?)(?=\n|\*\*|$)', section)
-                
-                if sender_match:
-                    email_data["sender"] = sender_match.group(1).strip()
-                
-                # Extract body content
-                body_parts = []
-                
-                # Find main points
-                main_points_match = re.search(r'Main Points:(.*?)(?=\*\*|$)', section, re.DOTALL)
-                if main_points_match:
-                    body_parts.append(f"Main Points: {main_points_match.group(1).strip()}")
-                
-                # Find summary
-                summary_match = re.search(r'Summary:(.*?)(?=\*\*|Main Points:|$)', section, re.DOTALL)
-                if summary_match:
-                    body_parts.append(f"Summary: {summary_match.group(1).strip()}")
-                
-                # If no specific parts found, use the whole section
-                if not body_parts:
-                    body_parts.append(section.strip())
-                
-                email_data["body"] = "\n\n".join(body_parts)
-                
-                # Extract attachments
-                email_data["attachments"] = []
-                attachment_match = re.search(r'Attachments:?\s*(.*?)(?=\n\*\*|$)', section, re.DOTALL)
-                if attachment_match:
-                    attachments_text = attachment_match.group(1).strip()
-                    if attachments_text.lower() != "none" and attachments_text.lower() != "none found":
-                        att_list = attachments_text.split(",")
-                        email_data["attachments"] = [att.strip() for att in att_list if att.strip()]
-                
-                # Only add if we have the minimum required data
-                if email_data.get("threadId") and email_data.get("subject"):
-                    emails.append(email_data)
-                    logger.info(f"Added email with Thread ID: {email_data['threadId']}")
+        # Convert to string if it's not already
+        if not isinstance(action_required_emails, str):
+            email_text = str(action_required_emails)
+        else:
+            email_text = action_required_emails
 
-        # If action_required_emails is a string, parse it
-        elif isinstance(action_required_emails, str):
-            logger.info("Parsing string output from CrewAI")
-            
-            # Split by predefined separators or use newlines as fallback
-            thread_sections = [action_required_emails]
-            
-            # Process each section
-            for section in thread_sections:
-                if not section.strip():
-                    continue
-                
-                logger.info(f"Processing section: {section[:100]}...")
-                
-                email_data = {}
-                
-                # Extract Thread ID
-                # thread_id_match = re.search(r'\*\*Thread ID:\*\*\s+(.*?)(?=\s+\-|\s+\*\*|\n)', section)
-                thread_id_match = re.search(r'\*\*?Thread ID:?[\*\s]*\**\s*(.*?)\s*(?=\n|\*\*|\-)', section)
-                if thread_id_match:
-                    email_data["threadId"] = thread_id_match.group(1).strip()
-                    logger.info(f"Found thread ID: {email_data['threadId']}")
-                
-                # Extract Subject (if available)
-                subject_match = re.search(r'\*\*Summary:\*\*\s+(.*?)(?=\s+\-|\s+\*\*|\n)', section)
-                if subject_match:
-                    email_data["subject"] = subject_match.group(1).strip()
-                elif "financial regulations" in section.lower():
-                    email_data["subject"] = "Financial Regulations Discussion"
-                elif "project" in section.lower() and "timelines" in section.lower():
-                    email_data["subject"] = "Project Status Update"
-                elif "technical" in section.lower():
-                    email_data["subject"] = "Technical Integration Issues"
-                else:
-                    email_data["subject"] = "Email Discussion"
-                
-                logger.info(f"Using subject: {email_data.get('subject')}")
-                
-                # Extract sender email
-                sender_match = re.search(r'\*\*Sender\'s Email Address:\*\*\s+(.*?)(?=\s+\-|\s+\*\*|\n)', section)
-                if sender_match:
-                    email_data["sender"] = sender_match.group(1).strip()
-                
-                # Extract main points for body
-                body_parts = []
-                
-                # Add summary if available
-                summary_match = re.search(r'\*\*Summary:\*\*\s+(.*?)(?=\s+\-|\s+\*\*|\n)', section)
-                if summary_match:
-                    body_parts.append(f"Summary: {summary_match.group(1).strip()}")
-                
-                # Add main points if available
-                main_points_section = re.search(r'\*\*Main Points:\*\*(.*?)(?=\s+\*\*|\Z)', section, re.DOTALL)
-                if main_points_section:
-                    body_parts.append(f"Main Points: {main_points_section.group(1).strip()}")
-                
-                # Use the whole section as body if nothing specific was found
-                if not body_parts:
-                    body_parts.append(section.strip())
-                
-                email_data["body"] = "\n\n".join(body_parts)
-                
-                # Extract attachments (if any)
-                attachments = []
-                if "Attachments downloaded:" in section or "📎" in section:
-                    for line in section.split("\n"):
-                        if "Attachments downloaded:" in line or "📎" in line:
-                            att_parts = line.split(":", 1)
-                            if len(att_parts) > 1:
-                                att_list = att_parts[1].strip().split(",")
-                                for att in att_list:
-                                    clean_att = att.strip()
-                                    if clean_att:
-                                        # Assume saved to attachments/ directory
-                                        attachments.append(os.path.join("attachments", clean_att))
+        logger.info(f"Raw email text to parse:\n{email_text}")
 
-                email_data["attachments"] = attachments
-
-                
-                # Only add to list if we have the minimum required data
-                if email_data.get("threadId") and email_data.get("subject"):
-                    # Add some identifiers for the API payload
-                    email_data["id"] = email_data.get("threadId")
-                    emails.append(email_data)
-                    logger.info(f"Added email with Thread ID: {email_data['threadId']}")
+        # Improved regex pattern for thread IDs - handle ### format from the logs
+        thread_id_pattern = r'### Thread ID:?\s*([A-Za-z0-9+/=]+)'
+        thread_ids = re.findall(thread_id_pattern, email_text)
         
-        # Handle structured output if available
-        elif isinstance(action_required_emails, dict):
-            logger.info("Parsing dictionary output from CrewAI")
+        # If we don't find thread IDs with ###, try with ** or plain format
+        if not thread_ids:
+            thread_id_pattern = r'(?:\*\*)?Thread ID:?(?:\*\*)?\s*([A-Za-z0-9+/=]+)'
+            thread_ids = re.findall(thread_id_pattern, email_text)
+        
+        # Clean thread IDs by removing any leading/trailing special characters
+        thread_ids = [tid.strip(':-* ') for tid in thread_ids]
+        
+        logger.info(f"Found thread IDs: {thread_ids}")
+
+        # Dump raw text to log to inspect format
+        logger.info("DEBUG - Raw CrewAI output format:")
+        logger.info("-" * 50)
+        logger.info(email_text)
+        logger.info("-" * 50)
+
+        # For each thread ID, extract the corresponding email data
+        for i, thread_id in enumerate(thread_ids):
+            logger.info(f"Processing thread ID #{i+1}: {thread_id}")
             
-            # Handle structured data - logic would depend on actual structure
-            # This is a placeholder for future implementation
-            pass
+            # Initialize email data with thread ID
+            email_data = {
+                "threadId": thread_id,
+                "id": thread_id,
+                "attachments": []
+            }
+            
+            # Extract subject directly without splitting sections
+            subject_pattern = r'\*\*Subject:\*\*\s*(.*?)(?=\n\*\*|\n$)'
+            subject_match = re.search(subject_pattern, email_text)
+            if subject_match:
+                email_data["subject"] = subject_match.group(1).strip()
+                logger.info(f"Found subject: {email_data['subject']}")
+            else:
+                email_data["subject"] = "Email from Thread"
+                logger.info(f"No subject found, using default: {email_data['subject']}")
+            
+            # Extract sender
+            sender_pattern = r'\*\*Sender\'s Email Address:\*\*\s*(.*?)(?=\n\*\*|\n$)'
+            sender_match = re.search(sender_pattern, email_text)
+            if sender_match:
+                email_data["sender"] = sender_match.group(1).strip()
+                logger.info(f"Found sender: {email_data['sender']}")
+            else:
+                logger.info("No sender found")
+            
+            # Extract summary
+            summary_pattern = r'\*\*Summary:\*\*\s*(.*?)(?=\n\*\*Main Points|\n$)'
+            summary_match = re.search(summary_pattern, email_text, re.DOTALL)
+            if summary_match:
+                summary = summary_match.group(1).strip()
+                logger.info(f"Found summary (first 50 chars): {summary[:50]}...")
+            else:
+                summary = ""
+                logger.info("No summary found")
+            
+            # Extract main points
+            main_points_pattern = r'\*\*Main Points:\*\*(.*?)(?=\n\*\*Attachments|\n$)'
+            main_points_match = re.search(main_points_pattern, email_text, re.DOTALL)
+            if main_points_match:
+                main_points = main_points_match.group(1).strip()
+                logger.info(f"Found main points (first 50 chars): {main_points[:50]}...")
+            else:
+                main_points = ""
+                logger.info("No main points found")
+            
+            # Combine for body
+            body_parts = []
+            if summary:
+                body_parts.append(f"Summary: {summary}")
+            if main_points:
+                body_parts.append(f"Main Points: {main_points}")
+            
+            email_data["body"] = "\n\n".join(body_parts) if body_parts else "No content extracted"
+            logger.info(f"Body length: {len(email_data['body'])} characters")
+            
+            # Extract attachments
+            attachments_pattern = r'\*\*Attachments:\*\*\s*(.*?)(?=\n\*\*|\n$)'
+            attachments_match = re.search(attachments_pattern, email_text)
+            if attachments_match:
+                attachments_text = attachments_match.group(1).strip()
+                logger.info(f"Found attachments text: {attachments_text}")
+                
+                if attachments_text.lower() not in ["none", "none found"]:
+                    attachments = [os.path.join("attachments", att.strip()) 
+                                  for att in re.split(r'[,;]', attachments_text) 
+                                  if att.strip()]
+                    email_data["attachments"] = attachments
+                    logger.info(f"Attachments: {attachments}")
+                else:
+                    logger.info("No attachments found (explicitly marked as None)")
+            else:
+                logger.info("No attachments section found")
+            
+            # Log the complete email data for debugging
+            logger.info(f"Complete email data for thread ID {thread_id}:")
+            logger.info(f"  - subject: {email_data.get('subject', 'N/A')}")
+            logger.info(f"  - sender: {email_data.get('sender', 'N/A')}")
+            logger.info(f"  - body length: {len(email_data.get('body', ''))}")
+            logger.info(f"  - attachments: {email_data.get('attachments', [])}")
+            
+            # Add the email data if we have the minimum required fields
+            if email_data.get("subject"):
+                emails.append(email_data)
+                logger.info(f"Added email with ThreadID={thread_id} to the list")
+            else:
+                logger.warning(f"Skipping email with ThreadID={thread_id} - missing required fields")
     
     except Exception as e:
-        logger.error(f"Error parsing action required emails: {str(e)}")
-        logger.error(f"Exception details: {e}", exc_info=True)
+        logger.error(f"Error parsing emails: {str(e)}", exc_info=True)
     
-    logger.info(f"Parsed {len(emails)} emails for integration")
+    logger.info(f"Successfully parsed {len(emails)} emails for integration")
     return emails
+
+def is_valid_thread_id(thread_id: str) -> bool:
+    """Validate Microsoft Graph thread/conversation ID format"""
+    if not thread_id:
+        return False
+    # Basic validation - adjust based on your actual ID patterns
+    return len(thread_id) > 20 and all(c.isalnum() or c in {'-', '_', '=', '+', '/'} for c in thread_id)
 
 # Main integration function
 def integrate_emails(action_required_emails):
@@ -448,28 +395,56 @@ def integrate_emails(action_required_emails):
         # Parse the email data with our improved parser
         emails = parse_action_required_emails(action_required_emails)
         
-        if not emails:
-            logger.warning("No emails parsed for integration")
+        # Log the number of emails parsed
+        logger.info(f"Parser returned {len(emails)} emails")
+        for i, email in enumerate(emails):
+            logger.info(f"Email {i+1} details:")
+            logger.info(f"  - ThreadID: {email.get('threadId', 'Unknown')}")
+            logger.info(f"  - Subject: {email.get('subject', 'Unknown')}")
+            logger.info(f"  - Sender: {email.get('sender', 'Unknown')}")
+            logger.info(f"  - Body length: {len(email.get('body', ''))}")
+            logger.info(f"  - Attachments: {email.get('attachments', [])}")
+        
+        valid_emails = []
+        for email in emails:
+            if not is_valid_thread_id(email.get('threadId', '')):
+                logger.warning(f"Skipping email with invalid thread ID: {email.get('threadId')}")
+                continue
+            valid_emails.append(email)
+            
+        logger.info(f"After validation, {len(valid_emails)} valid emails remain")
+        
+        if not valid_emails:
+            logger.warning("No valid emails found after thread ID validation")
             return {
                 "success": False,
-                "message": "No valid emails found for integration",
+                "message": "No valid emails found (invalid thread IDs)",
                 "results": []
             }
         
-        logger.info(f"Successfully parsed {len(emails)} emails for integration")
-        for i, email in enumerate(emails):
-            logger.info(f"Email {i+1}: ThreadID={email.get('threadId')}, Subject={email.get('subject')}")
+        logger.info(f"Successfully parsed {len(valid_emails)} valid emails for integration")
+        for i, email in enumerate(valid_emails):
+            logger.info(f"Valid Email {i+1}: ThreadID={email.get('threadId')}, Subject={email.get('subject')}")
         
         # Inject downloaded attachments into email data
-        for email in emails:
+        for email in valid_emails:
             thread_id = email.get("threadId")
             if thread_id:
-                email["attachments"] = fetch_attachments_from_graph(thread_id)
+                logger.info(f"Fetching attachments for thread ID: {thread_id}")
+                attachments = fetch_attachments_from_graph(thread_id)
+                if attachments:
+                    email["attachments"] = attachments
+                    logger.info(f"Added {len(attachments)} attachments to email: {attachments}")
+                else:
+                    logger.info(f"No attachments found for thread ID: {thread_id}")
+        
         # Initialize the integration service
+        logger.info("Initializing EmailIntegration service")
         integration = EmailIntegration()
         
         # Process the emails
-        results = integration.process_emails(emails)
+        logger.info(f"Processing {len(valid_emails)} emails with EmailIntegration")
+        results = integration.process_emails(valid_emails)
         
         # Calculate success status
         success_count = sum(1 for r in results if r.get("integration_result", {}).get("success", False))
@@ -484,7 +459,7 @@ def integrate_emails(action_required_emails):
         }
     
     except Exception as e:
-        logger.error(f"Error in email integration process: {str(e)}")
+        logger.error(f"Error in email integration process: {str(e)}", exc_info=True)
         return {
             "success": False,
             "message": f"Integration failed: {str(e)}",
@@ -496,53 +471,100 @@ def fetch_attachments_from_graph(thread_id: str, save_dir: str = "attachments") 
     Fetch and save all attachments from a given email thread via MS Graph API.
     Returns a list of local file paths.
     """
+    # Clean the thread ID first
+    thread_id = thread_id.strip(':-* ')
+    
+    if not thread_id:
+        logger.error("Empty thread ID provided")
+        return []
+        
     logger.info(f"Fetching attachments for thread: {thread_id}")
     os.makedirs(save_dir, exist_ok=True)
-    access_token = get_graph_token()
     
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
+    try:
+        access_token = get_graph_token()
+        if not access_token:
+            logger.error("Failed to get Graph token")
+            return []
+            
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
 
-    user_email = os.getenv("MS_USER_EMAIL")
-    endpoint = f"https://graph.microsoft.com/v1.0/users/{user_email}/messages?$filter=conversationId eq '{thread_id}'"
+        user_email = os.getenv("MS_USER_EMAIL")
+        
+        # First, try to use thread_id as message ID to get conversation ID
+        try:
+            message_endpoint = f"https://graph.microsoft.com/v1.0/users/{user_email}/messages/{thread_id}"
+            message_response = requests.get(message_endpoint, headers=headers)
+            
+            if message_response.status_code == 200:
+                # Successfully fetched message, use its conversationId
+                conversation_id = message_response.json().get("conversationId")
+                if conversation_id:
+                    logger.info(f"Found conversationId from message: {conversation_id}")
+                    endpoint = f"https://graph.microsoft.com/v1.0/users/{user_email}/messages?$filter=conversationId eq '{conversation_id}'"
+                else:
+                    # Fallback to using thread_id directly as conversationId
+                    logger.warning("No conversationId found in message, using thread_id as conversationId")
+                    endpoint = f"https://graph.microsoft.com/v1.0/users/{user_email}/messages?$filter=conversationId eq '{thread_id}'"
+            else:
+                # Failed to fetch message, thread_id might be a conversationId already
+                logger.warning(f"Failed to fetch message using thread_id as messageId: {message_response.status_code}")
+                endpoint = f"https://graph.microsoft.com/v1.0/users/{user_email}/messages?$filter=conversationId eq '{thread_id}'"
+        except Exception as e:
+            logger.warning(f"Error when trying to get conversationId: {str(e)}")
+            # Fallback to using thread_id directly as conversationId
+            endpoint = f"https://graph.microsoft.com/v1.0/users/{user_email}/messages?$filter=conversationId eq '{thread_id}'"
 
+        # Fetch messages in the conversation
+        response = requests.get(endpoint, headers=headers)
+        
+        if response.status_code != 200:
+            logger.error(f"Failed to fetch messages: {response.text}")
+            return []
 
-    response = requests.get(endpoint, headers=headers)
+        messages = response.json().get("value", [])
+        downloaded_files = []
 
-    if response.status_code != 200:
-        logger.error(f"Failed to fetch messages: {response.text}")
+        for message in messages:
+            msg_id = message.get("id")
+            if not msg_id:
+                continue
+                
+            attachment_url = f"https://graph.microsoft.com/v1.0/users/{user_email}/messages/{msg_id}/attachments"
+            att_resp = requests.get(attachment_url, headers=headers)
+
+            if att_resp.status_code != 200:
+                logger.warning(f"No attachments found for message {msg_id}")
+                continue
+
+            for attachment in att_resp.json().get("value", []):
+                if attachment.get("@odata.type") == "#microsoft.graph.fileAttachment":
+                    filename = attachment.get("name")
+                    content_bytes = attachment.get("contentBytes")
+
+                    if not filename or not content_bytes:
+                        continue
+
+                    # Sanitize filename
+                    filename = "".join(c for c in filename if c.isalnum() or c in (' ', '.', '_', '-')).rstrip()
+                    file_path = os.path.join(save_dir, filename)
+                    
+                    try:
+                        with open(file_path, "wb") as f:
+                            f.write(base64.b64decode(content_bytes))
+                        downloaded_files.append(file_path)
+                        logger.info(f"Downloaded attachment: {file_path}")
+                    except Exception as e:
+                        logger.error(f"Failed to save attachment {filename}: {e}")
+        
+        return downloaded_files
+        
+    except Exception as e:
+        logger.error(f"Error fetching attachments: {e}")
         return []
-
-    messages = response.json().get("value", [])
-    downloaded_files = []
-
-    for message in messages:
-        msg_id = message.get("id")
-        attachment_url = f"https://graph.microsoft.com/v1.0/users/{user_email}/messages/{msg_id}/attachments"
-
-        att_resp = requests.get(attachment_url, headers=headers)
-
-        if att_resp.status_code != 200:
-            logger.warning(f"No attachments found for message {msg_id}")
-            continue
-
-        for attachment in att_resp.json().get("value", []):
-            if attachment.get("@odata.type") == "#microsoft.graph.fileAttachment":
-                filename = attachment["name"]
-                content_bytes = attachment["contentBytes"]
-
-                file_path = os.path.join(save_dir, filename)
-                try:
-                    with open(file_path, "wb") as f:
-                        f.write(base64.b64decode(content_bytes))
-                    downloaded_files.append(file_path)
-                    logger.info(f"Downloaded attachment: {file_path}")
-                except Exception as e:
-                    logger.error(f"Failed to save attachment {filename}: {e}")
-    
-    return downloaded_files
 
 def send_confirmation_email(recipient_email: str, subject: str, correspondence_id: str):
     """
